@@ -7,6 +7,7 @@ import xattr
 from maestral.constants import IS_LINUX
 from maestral.utils.appdirs import get_home_dir
 from maestral.utils.path import (
+    delete,
     get_existing_equivalent_paths,
     is_child,
     is_fs_case_sensitive,
@@ -124,3 +125,83 @@ def test_move_preserves_xattrs(tmp_path):
     move(src_path, dest_path, keep_target_xattrs=True)
 
     assert xattr.getxattr(dest_path, attr_name) == attr_value
+
+
+def test_delete_symlink_with_real_parents(tmp_path):
+    # Symlink as the final path component, with real parent directories. The
+    # case verification must not raise and the symlink must be removed.
+
+    root = os.path.realpath(str(tmp_path))
+
+    real = os.path.join(root, "real")
+    os.makedirs(real)
+
+    link = os.path.join(real, "link")
+    os.symlink("nowhere", link)
+
+    assert delete(link, force_case_sensitive=True) is None
+    assert not os.path.lexists(link)
+
+
+def test_delete_symlink_through_symlinked_directory(tmp_path):
+    # A symlinked directory in the middle of the path and a symlink at the end.
+    # The fallback case-insensitive scan of the file system can neither descend
+    # into the symlinked directory nor resolve the final symlink, so the case
+    # verification must fall back to the item at the given path.
+
+    root = os.path.realpath(str(tmp_path))
+
+    real = os.path.join(root, "real")
+    os.makedirs(real)
+
+    os.symlink("real", os.path.join(root, "kdir"))
+
+    flink = os.path.join(real, "flink")
+    os.symlink("nowhere", flink)
+
+    path = os.path.join(root, "kdir", "flink")
+
+    assert delete(path, force_case_sensitive=True) is None
+    assert not os.path.lexists(flink)
+
+
+def test_delete_returns_error_if_parent_is_file(tmp_path):
+    # A regular file occupies a directory position in the path. Deletion must
+    # fail with a returned FileNotFoundError instead of raising.
+
+    root = os.path.realpath(str(tmp_path))
+
+    file = os.path.join(root, "file")
+    touch(file)
+
+    err = delete(os.path.join(file, "child"), force_case_sensitive=True)
+
+    assert isinstance(err, FileNotFoundError)
+
+
+def test_delete_returns_error_if_path_is_missing(tmp_path):
+    # Deleting a missing path must return a FileNotFoundError instead of
+    # raising.
+
+    root = os.path.realpath(str(tmp_path))
+
+    err = delete(os.path.join(root, "nope"), force_case_sensitive=True)
+
+    assert isinstance(err, FileNotFoundError)
+
+
+def test_delete_case_sensitive_keeps_differently_cased_file(tmp_path):
+    # A file with a different casing than the given path must neither be
+    # deleted nor raise an error. On case-sensitive file systems, no match can
+    # be found at all; on case-insensitive file systems, the cased match must
+    # be rejected by the case verification.
+
+    root = os.path.realpath(str(tmp_path))
+
+    path = os.path.join(root, "Cased.txt")
+    touch(path)
+
+    err = delete(os.path.join(root, "cased.txt"), force_case_sensitive=True)
+
+    assert isinstance(err, FileNotFoundError)
+    assert os.path.exists(path)
