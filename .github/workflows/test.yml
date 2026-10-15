@@ -1,36 +1,31 @@
 name: Run tests
 
 on:
-  schedule:
-    - cron: '30 3 * * SUN'
-  pull_request_target:
+  push:
+    branches: [main]
+  pull_request:
     paths:
-      # run tests only when the python code has changed
+      # run tests only when the python code or CI config has changed
       - 'src/**.py'
       - 'tests/**.py'
+      - '.github/**'
+  schedule:
+    - cron: '30 3 * * SUN'
   workflow_dispatch:
 
 jobs:
   offline-tests:
     name: offline
     strategy:
+      fail-fast: false
       matrix:
         platform: [ubuntu-latest, macos-latest]
-        python-version: ['3.10', '3.x']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     runs-on: ${{ matrix.platform }}
     steps:
-
-      - name: Checkout merge commit
+      - name: Checkout
         uses: actions/checkout@v5
-        if: github.event_name == 'pull_request_target'
-        with:
-          ref: 'refs/pull/${{ github.event.number }}/merge'
-          persist-credentials: false
-
-      - name: Checkout head commit
-        uses: actions/checkout@v5
-        if: github.event_name != 'pull_request_target'
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6.0.0
@@ -44,158 +39,9 @@ jobs:
 
       - name: Test with pytest
         run: |
-          python -m pytest --cov=maestral --cov-report=xml tests/offline
+          python -m pytest --cov=maestral --cov-report=term-missing tests/offline
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          flags: pytest
-          env_vars: OS,PYTHON,TYPE
-          name: pytests -v
-          token: ${{ secrets.CODECOV_TOKEN }}
-        env:
-          OS: ${{ matrix.platform }}
-          PYTHON: ${{ matrix.python-version }}
-          TYPE: 'offline'
-
-  linked-unit-tests:
-    name: Linked unit tests
-    needs: offline-tests
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [ubuntu-latest, macos-latest]
-        include:
-          - platform: ubuntu-latest
-            token: DROPBOX_REFRESH_TOKEN_1
-
-          - platform: macos-latest
-            token: DROPBOX_REFRESH_TOKEN_2
-
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - name: Checkout merge commit
-        uses: actions/checkout@v5
-        if: github.event_name == 'pull_request_target'
-        with:
-          ref: 'refs/pull/${{ github.event.number }}/merge'
-          persist-credentials: false
-
-      - name: Checkout head commit
-        uses: actions/checkout@v5
-        if: github.event_name != 'pull_request_target'
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.0.0
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -U .[test]
-
-      - name: Get short-lived Oauth2 access token
-        # We generate a short-lived auth token which is passed to the test runner as
-        # an environment variable. At no point does the test code, potentially from an
-        # untrusted 3rd party, get access to a long-lived token.
-        run: |
-          auth_result=$(curl https://api.dropbox.com/oauth2/token \
-              -d grant_type=refresh_token \
-              -d refresh_token=${{ secrets[matrix.token] }} \
-              -d client_id=2jmbq42w7vof78h)
-          token=$(echo $auth_result | python -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
-          echo "::add-mask::$token"
-          echo "DROPBOX_ACCESS_TOKEN=$token" >> $GITHUB_ENV
-
-      - name: Test with pytest
-        run: |
-          pytest -v --cov=maestral --cov-report=xml tests/linked/unit
-
-      - name: Upload Code Coverage
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          flags: pytest
-          env_vars: OS,PYTHON,TYPE
-          name: pytests
-          token: ${{ secrets.CODECOV_TOKEN }}
-        env:
-          OS: ${{ matrix.platform }}
-          PYTHON: ${{ matrix.python-version }}
-          TYPE: 'linked-unit-tests'
-
-  linked-integration-tests:
-    name: Linked integration tests
-    needs: linked-unit-tests
-    strategy:
-      fail-fast: false
-      matrix:
-        observer: [inotify, fsevents]
-        include:
-          - observer: inotify
-            platform: ubuntu-latest
-            token: DROPBOX_REFRESH_TOKEN_1
-
-          - observer: fsevents
-            platform: macos-latest
-            token: DROPBOX_REFRESH_TOKEN_2
-
-#          - observer: kqueue
-#            platform: macos-latest
-#            token: DROPBOX_REFRESH_TOKEN_3
-
-
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - name: Checkout merge commit
-        uses: actions/checkout@v5
-        if: github.event_name == 'pull_request_target'
-        with:
-          ref: 'refs/pull/${{ github.event.number }}/merge'
-          persist-credentials: false
-
-      - name: Checkout head commit
-        uses: actions/checkout@v5
-        if: github.event_name != 'pull_request_target'
-
-      - name: Set up Python
-        uses: actions/setup-python@v6.0.0
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -U .[test]
-
-      - name: Get short-lived Dropbox token
-        # We generate a short-lived auth token which is passed to the test runner as
-        # an environment variable. At no point does the test code, potentially from a
-        # malicious PR, get access to a long-lived token.
-        run: |
-          auth_result=$(curl https://api.dropbox.com/oauth2/token \
-              -d grant_type=refresh_token \
-              -d refresh_token=${{ secrets[matrix.token] }} \
-              -d client_id=2jmbq42w7vof78h)
-          token=$(echo $auth_result | python -c "import sys, json; print(json.load(sys.stdin)['access_token'])")
-          echo "::add-mask::$token"
-          echo "DROPBOX_ACCESS_TOKEN=$token" >> $GITHUB_ENV
-
-      - name: Test with pytest
-        run: |
-          pytest --verbose --cov=maestral --cov-report=xml tests/linked/integration --fs-observer ${{ matrix.observer }}
-
-      - name: Upload Code Coverage
-        uses: codecov/codecov-action@v5
-        with:
-          file: ./coverage.xml
-          flags: pytest
-          env_vars: OS,PYTHON,TYPE
-          name: pytests
-          token: ${{ secrets.CODECOV_TOKEN }}
-        env:
-          OS: ${{ matrix.platform }}
-          PYTHON: ${{ matrix.python-version }}
-          TYPE: 'linked-integration-tests'
+# NOTE: upstream's linked-unit-tests and linked-integration-tests jobs are omitted
+# on this fork. They authenticate against Dropbox test accounts using the
+# DROPBOX_REFRESH_TOKEN_* secrets, which only exist in the upstream repository.
+# They can be re-added with your own test-account tokens.
