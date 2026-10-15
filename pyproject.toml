@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "maestral"
-version = "1.9.7.dev0"
+version = "1.10.0"
 authors = [{ name = "Sam Schott", email = "sam.schott@outlook.com" }]
 license = { text = "MIT" }
 description = "Open-source Dropbox client for macOS and Linux."
@@ -49,8 +49,8 @@ content-type = "text/markdown"
 
 [project.optional-dependencies]
 gui = [
-    "maestral-qt>=1.9.7.dev0;sys_platform=='linux'",
-    "maestral-cocoa>=1.9.7.dev0;sys_platform=='darwin'",
+    "maestral-qt>=1.10.0;sys_platform=='linux'",
+    "maestral-cocoa>=1.10.0;sys_platform=='darwin'",
 ]
 syslog = ["systemd-python"]
 lint = [

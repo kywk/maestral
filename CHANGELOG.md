@@ -1,3 +1,28 @@
+## v1.10.0
+
+#### Changed:
+
+- Reorganized CI for this fork: tests run on pushes to `main` and on pull requests, the
+  upstream release workflows and the Dropbox test-account jobs were removed and the
+  Codecov upload was dropped. Test matrix updated to Python 3.11 - 3.14.
+- Pinned the Dropbox SDK to `<12.1`. Version 12.1 and above changed SDK internals that
+  Maestral's streamed uploads depend on.
+- Added `scripts/deploy.sh` to install a git revision into the local daemon venv and
+  restart the launchd agent.
+
+#### Fixed:
+
+- Fixed a crash in the download cycle when remote deletions affected local items whose
+  paths only differed in case. The crash could leave sync permanently paused or make
+  the daemon crash-loop on every resume.
+- Fixed newly created folders and files leaking "modified" events into the upload
+  queue when created under a recursive ignore (watchdog 6 on macOS).
+
+#### Added:
+
+- Regression tests for case-sensitive deletes of symlinks, type conflicts and missing
+  paths.
+
 ## v1.9.6
 
 #### Fixed:
