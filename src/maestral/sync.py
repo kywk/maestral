@@ -39,7 +39,7 @@ from typing import (
 
 # external imports
 import click
-from pathspec import PathSpec
+from pathspec import PathSpec, Pattern
 from typing_extensions import ParamSpec, TypeGuard
 from watchdog.events import (
     EVENT_TYPE_CREATED,
@@ -338,7 +338,14 @@ class FSEventHandler(FileSystemEventHandler):
             # respective paths of the event to ignore.
             elif recursive:
                 if not event.event_type == ignore_event.event_type:
-                    continue
+                    # Creating a file or folder may additionally emit a "modified"
+                    # event for it (seen with watchdog 6 on macOS). Treat those as
+                    # part of the creation of the ignored tree.
+                    if not (
+                        ignore_event.event_type == EVENT_TYPE_CREATED
+                        and event.event_type == EVENT_TYPE_MODIFIED
+                    ):
+                        continue
 
                 if not is_equal_or_child(event.src_path, ignore_event.src_path):
                     continue
@@ -1145,7 +1152,7 @@ class SyncEngine:
         return self._mignore_path
 
     @property
-    def mignore_rules(self) -> PathSpec:
+    def mignore_rules(self) -> PathSpec[Pattern]:
         """List of mignore rules following git wildmatch syntax (read only)."""
         return self._mignore_rules
 

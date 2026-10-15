@@ -5,11 +5,14 @@ from watchdog.events import (
     DirCreatedEvent,
     DirModifiedEvent,
     DirMovedEvent,
+    FileCreatedEvent,
+    FileDeletedEvent,
+    FileModifiedEvent,
     FileMovedEvent,
 )
 
 from maestral.models import ChangeType, ItemType
-from maestral.sync import SyncDirection, SyncEngine
+from maestral.sync import FSEventHandler, SyncDirection, SyncEngine
 from maestral.utils.path import move
 
 
@@ -60,6 +63,28 @@ def test_fs_ignore_tree_creation(sync: SyncEngine) -> None:
     sync.wait_for_local_changes(timeout=1)
     sync_events, _ = sync.list_local_changes()
     assert len(sync_events) == 0
+
+
+def test_ignore_created_tree_companion_modified_events() -> None:
+    # Creating a file or folder also emits "modified" events for it in addition to
+    # the created event (seen with watchdog 6 on macOS). A recursive ignore for a
+    # created folder must swallow both, without swallowing unrelated events.
+    handler = FSEventHandler()
+    handler.enable()
+
+    new_dir = "/parent"
+    new_file = f"{new_dir}/test"
+
+    with handler.ignore(DirCreatedEvent(new_dir)):
+        handler.on_any_event(DirCreatedEvent(new_dir))
+        handler.on_any_event(FileCreatedEvent(new_file))
+        handler.on_any_event(FileModifiedEvent(new_file))
+
+    assert handler.local_file_event_queue.empty()
+
+    # Deleting a child is a separate change and must still be queued.
+    handler.on_any_event(FileDeletedEvent(new_file))
+    assert not handler.local_file_event_queue.empty()
 
 
 def test_fs_ignore_tree_move(sync: SyncEngine) -> None:
