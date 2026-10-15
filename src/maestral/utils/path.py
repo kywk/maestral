@@ -266,7 +266,9 @@ def to_existing_unnormalized_path(
     candidates = get_existing_equivalent_paths(path, root)
 
     if len(candidates) == 0:
-        raise FileNotFoundError(f'No matches with different casing found in "{root}"')
+        raise FileNotFoundError(
+            f'No matches with different casing found for "{path}" in "{root}"'
+        )
     return candidates[0]
 
 
@@ -339,14 +341,29 @@ def delete(
     """
     err: Optional[OSError] = None
 
-    if force_case_sensitive and not equal_but_for_unicode_norm(
-        path, to_existing_unnormalized_path(path)
-    ):
-        err = FileNotFoundError(f"No such file '{path}'")
-        if raise_error:
-            raise err
-        else:
-            return err
+    if force_case_sensitive:
+        try:
+            existing: Optional[str] = to_existing_unnormalized_path(path)
+        except OSError:
+            # We could not resolve the canonical casing of the item, for example
+            # because a path component is a symlink or a file which the fallback
+            # scan cannot traverse. If an item exists at the given path, we take it
+            # as the item to delete: on a case-insensitive file system there cannot
+            # be a differently cased match in that case. Deletion below does not
+            # follow symlinks.
+            try:
+                item_exists = exists(path)
+            except OSError:
+                item_exists = False
+
+            existing = path if item_exists else None
+
+        if existing is None or not equal_but_for_unicode_norm(path, existing):
+            err = FileNotFoundError(f"No such file '{path}'")
+            if raise_error:
+                raise err
+            else:
+                return err
 
     try:
         shutil.rmtree(path)  # Will raise OSError when it finds a symlink.
