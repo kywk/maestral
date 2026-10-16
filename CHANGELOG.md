@@ -1,3 +1,22 @@
+## v1.10.1
+
+#### Changed:
+
+- Restored compatibility with Dropbox SDK 12.1+ and relaxed the dependency pin back to
+  `dropbox>=11.28.0,<13.0`. The SDK override now handles the `extra_headers` keyword
+  added in 12.1 and the `UploadSessionAppendError` hierarchy changes of 12.2. Verified
+  against dropbox 12.0.2, 12.1.0 and 12.2.3.
+- Fixed the `[gui]` extra: pins now point to the newest releases that exist on PyPI
+  (`maestral-qt>=1.9.8,<2`, `maestral-cocoa>=1.9.6,<2`). Version bumps no longer
+  rewrite these pins to nonexistent versions.
+
+#### Added:
+
+- `OPERATIONS.md` documenting the local daemon deployment (components, daily ops,
+  update/rollback flow, troubleshooting, dependency policy).
+- Offline regression tests for the dropbox SDK override (`extra_headers` handling) and
+  upload session error conversion across SDK versions.
+
 ## v1.10.0
 
 #### Changed:
