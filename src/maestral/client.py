@@ -8,6 +8,7 @@ from __future__ import annotations
 import functools
 
 # system imports
+import inspect
 import os
 import re
 import time
@@ -104,6 +105,24 @@ def get_hash(data: bytes) -> str:
     return hasher.hexdigest()
 
 
+def _sdk_accepts_extra_headers() -> bool:
+    """Check if the installed Dropbox SDK supports the ``extra_headers`` keyword.
+
+    ``extra_headers`` was added to ``request_json_string`` and friends in dropbox
+    12.1.0. It must not be forwarded to older SDK versions.
+
+    :returns: Whether the parent implementation accepts ``extra_headers``.
+    """
+    try:
+        parameters = inspect.signature(Dropbox.request_json_string).parameters
+    except (TypeError, ValueError):  # pragma: no cover
+        return False
+    return "extra_headers" in parameters
+
+
+_SDK_ACCEPTS_EXTRA_HEADERS = _sdk_accepts_extra_headers()
+
+
 class _DropboxSDK(Dropbox):
     def request_json_string(
         self,
@@ -114,6 +133,7 @@ class _DropboxSDK(Dropbox):
         auth_type: str,
         request_binary: bytes | Iterator[bytes] | None,
         timeout: float | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> RouteResult | RouteErrorResult:
         # Custom handling to allow for streamed and chunked uploads. This is mostly
         # reproduced from the parent function but without limiting the request body
@@ -127,13 +147,18 @@ class _DropboxSDK(Dropbox):
             if USER_AUTH not in auth_types:
                 raise BadInputException("Unhandled auth type: {}".format(auth_type))
 
-            headers = {
-                "User-Agent": self._user_agent,
-                "Authorization": f"Bearer {self._oauth2_access_token}",
-            }
+            headers = {"User-Agent": self._user_agent}
 
             if self._headers:
                 headers.update(self._headers)
+
+            if extra_headers:
+                headers.update(extra_headers)
+
+            # The auth header is managed by the SDK and cannot be overridden,
+            # neither by custom headers nor by per-request extra headers. This
+            # mirrors the parent implementation in dropbox >= 12.1.
+            headers["Authorization"] = f"Bearer {self._oauth2_access_token}"
 
             headers["Content-Type"] = "application/octet-stream"
             headers["Dropbox-API-Arg"] = request_json_arg
@@ -160,6 +185,18 @@ class _DropboxSDK(Dropbox):
 
             raw_resp = r.content.decode("utf-8")
             return RouteResult(raw_resp)
+
+        elif _SDK_ACCEPTS_EXTRA_HEADERS:
+            return super().request_json_string(
+                host,
+                func_name,
+                route_style,
+                request_json_arg,
+                auth_type,
+                request_binary,
+                timeout,
+                extra_headers=extra_headers,
+            )
 
         else:
             return super().request_json_string(

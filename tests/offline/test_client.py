@@ -1,14 +1,18 @@
 from datetime import datetime, timezone
-from unittest.mock import Mock
+from inspect import signature
+from unittest.mock import Mock, patch
 
 import pytest
 import requests
 from dropbox import common, files, sharing, team_common, users, users_common
+from dropbox.dropbox_client import Dropbox, RouteResult
 from dropbox.oauth import DropboxOAuth2FlowNoRedirect
 
 from maestral import core
 from maestral.client import (
+    _SDK_ACCEPTS_EXTRA_HEADERS,
     DropboxClient,
+    _DropboxSDK,
     convert_account,
     convert_full_account,
     convert_metadata,
@@ -441,3 +445,74 @@ def test_convert_sharedlink_metdata():
 
     assert md.link_permissions.effective_audience is core.LinkAudience.NoOne
     assert md.link_permissions.require_password is False
+
+
+# ==== _DropboxSDK tests ===============================================================
+
+
+def test_sdk_accepts_extra_headers():
+    """Our override must accept the `extra_headers` keyword.
+
+    dropbox 12.1.0 added this keyword to the parent implementation and passes it
+    down from :meth:`Dropbox.request` and
+    :meth:`Dropbox.request_json_string_with_retry`.
+    """
+    assert "extra_headers" in signature(_DropboxSDK.request_json_string).parameters
+
+
+def test_sdk_upload_extra_headers():
+    """Extra headers must be merged into upload requests."""
+    session = Mock(spec=requests.Session)
+    session.post.return_value = Mock(
+        status_code=200,
+        headers={"x-dropbox-request-id": "test-request-id"},
+        content=b"{}",
+    )
+
+    dbx = _DropboxSDK(oauth2_access_token="test-token", session=session)
+
+    dbx.request_json_string(
+        "content",
+        "files/upload",
+        "upload",
+        b'{"path": "/file"}',
+        "user",
+        iter([b"data"]),
+        extra_headers={"X-Test-Header": "test", "Authorization": "Bearer injected"},
+    )
+
+    headers = session.post.call_args.kwargs["headers"]
+
+    assert headers["X-Test-Header"] == "test"
+    assert headers["User-Agent"] == dbx._user_agent
+    assert headers["Dropbox-API-Arg"] == b'{"path": "/file"}'
+    # The SDK-managed auth header must not be overridden by extra headers.
+    assert headers["Authorization"] == "Bearer test-token"
+
+
+def test_sdk_forward_extra_headers_to_parent():
+    """`extra_headers` must be forwarded to the parent when supported."""
+    session = Mock(spec=requests.Session)
+
+    dbx = _DropboxSDK(oauth2_access_token="test-token", session=session)
+
+    with patch.object(
+        Dropbox, "request_json_string", return_value=RouteResult("{}")
+    ) as patched:
+        result = dbx.request_json_string(
+            "api",
+            "files/list_folder",
+            "rpc",
+            b"{}",
+            "user",
+            b"{}",
+            extra_headers={"X-Test-Header": "test"},
+        )
+
+    assert isinstance(result, RouteResult)
+
+    if _SDK_ACCEPTS_EXTRA_HEADERS:
+        assert patched.call_args.kwargs["extra_headers"] == {"X-Test-Header": "test"}
+    else:
+        # dropbox < 12.1 does not accept the keyword and must not receive it.
+        assert "extra_headers" not in patched.call_args.kwargs

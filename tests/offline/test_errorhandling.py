@@ -121,6 +121,17 @@ def test_get_write_error_msg(error, maestral_exc):
         (UploadSessionLookupError.not_found, SyncError),
         (UploadSessionLookupError.too_large, FileSizeError),
         (UploadSessionAppendError.content_hash_mismatch, DataCorruptionError),
+        # UploadSessionAppendError is no longer a subclass of
+        # UploadSessionLookupError in dropbox >= 12.2 and is missing the
+        # "not_closed" tag.
+        (UploadSessionAppendError.closed, SyncError),
+        (
+            UploadSessionAppendError.incorrect_offset(UploadSessionOffsetError(20)),
+            DataCorruptionError,
+        ),
+        (UploadSessionAppendError.not_found, SyncError),
+        (UploadSessionAppendError.too_large, FileSizeError),
+        (UploadSessionAppendError.payload_too_large, SyncError),
     ],
 )
 def test_get_session_lookup_error_msg(error, maestral_exc):
@@ -181,6 +192,15 @@ def test_get_session_lookup_error_msg(error, maestral_exc):
         (UploadSessionFinishError.other, MaestralApiError),
         (UploadSessionLookupError.too_large, FileSizeError),
         (UploadSessionLookupError.other, MaestralApiError),
+        # UploadSessionAppendError is no longer a subclass of
+        # UploadSessionLookupError in dropbox >= 12.2.
+        (
+            UploadSessionAppendError.incorrect_offset(UploadSessionOffsetError(20)),
+            DataCorruptionError,
+        ),
+        (UploadSessionAppendError.content_hash_mismatch, DataCorruptionError),
+        (UploadSessionAppendError.not_found, SyncError),
+        (UploadSessionAppendError.other, MaestralApiError),
         (DownloadError.path(LookupError.not_found), NotFoundError),
         (DownloadError.unsupported_file, UnsupportedFileError),
         (DownloadError.other, MaestralApiError),
